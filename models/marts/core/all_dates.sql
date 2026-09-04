@@ -1,5 +1,5 @@
 {{ config(
-    materialized='table'
+    materialized='view'
 ) }}
 
 with date_spine as (
