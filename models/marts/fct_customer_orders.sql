@@ -7,80 +7,126 @@ customers as (
 
 ),
 
-paid_orders as (
+orders as (
 
     select *
     from {{ ref('int_orders') }}
 
 ),
 
-final as (
+customer_orders as (
 
     select
-        paid_orders.order_id,
-        paid_orders.customer_id,
-        paid_orders.order_date,
-        paid_orders.order_status,
-        paid_orders.valid_order_date,
-        paid_orders.total_amount_paid,
-        paid_orders.payment_finalized_date,
+        orders.*,
         customers.first_name,
         customers.last_name,
 
-        -- Sales transaction sequence
+        min(orders.valid_order_date) over (
+            partition by orders.customer_id
+        ) as first_order_date,
+
+        max(orders.valid_order_date) over (
+            partition by orders.customer_id
+        ) as most_recent_order_date,
+
+        count(*) over (
+            partition by orders.customer_id
+        ) as order_count,
+
+        sum(
+            nvl2(orders.valid_order_date, 1, 0)
+        ) over (
+            partition by orders.customer_id
+        ) as non_returned_order_count,
+
+        sum(
+            nvl2(
+                orders.valid_order_date,
+                orders.total_amount_paid,
+                0
+            )
+        ) over (
+            partition by orders.customer_id
+        ) as total_lifetime_value
+
+    from orders
+
+    inner join customers
+        on orders.customer_id = customers.customer_id
+
+),
+
+add_avg_order_values as (
+
+    select
+        customer_orders.*,
+
+        customer_orders.total_lifetime_value
+        / nullif(
+            customer_orders.non_returned_order_count,
+            0
+        ) as avg_non_returned_order_value
+
+    from customer_orders
+
+),
+
+final as (
+
+    select
+        add_avg_order_values.order_id,
+        add_avg_order_values.customer_id,
+        add_avg_order_values.order_date as order_placed_at,
+        add_avg_order_values.order_status,
+        add_avg_order_values.total_amount_paid,
+        add_avg_order_values.payment_finalized_date,
+        add_avg_order_values.first_name as customer_first_name,
+        add_avg_order_values.last_name as customer_last_name,
+
         row_number() over (
             order by
-                paid_orders.order_date,
-                paid_orders.order_id
+                add_avg_order_values.order_date,
+                add_avg_order_values.order_id
         ) as transaction_seq,
 
-        -- Customer sales sequence
         row_number() over (
-            partition by paid_orders.customer_id
+            partition by add_avg_order_values.customer_id
             order by
-                paid_orders.order_date,
-                paid_orders.order_id
+                add_avg_order_values.order_date,
+                add_avg_order_values.order_id
         ) as customer_sales_seq,
 
-        -- New versus returning customer
         case
             when (
                 rank() over (
-                    partition by paid_orders.customer_id
+                    partition by add_avg_order_values.customer_id
                     order by
-                        paid_orders.order_date,
-                        paid_orders.order_id
+                        add_avg_order_values.order_date,
+                        add_avg_order_values.order_id
                 )
             ) = 1
                 then 'new'
             else 'return'
         end as nvsr,
 
-        -- Running customer lifetime value
         sum(
-            paid_orders.total_amount_paid
+            add_avg_order_values.total_amount_paid
         ) over (
-            partition by paid_orders.customer_id
+            partition by add_avg_order_values.customer_id
             order by
-                paid_orders.order_date,
-                paid_orders.order_id
+                add_avg_order_values.order_date,
+                add_avg_order_values.order_id
             rows between unbounded preceding and current row
         ) as customer_lifetime_value,
 
-        -- First valid day of sale
-        first_value(
-            paid_orders.valid_order_date
-        ) ignore nulls over (
-            partition by paid_orders.customer_id
-            order by
-                paid_orders.order_date,
-                paid_orders.order_id
-        ) as fdos
+        add_avg_order_values.first_order_date as fdos,
+        add_avg_order_values.most_recent_order_date,
+        add_avg_order_values.order_count,
+        add_avg_order_values.non_returned_order_count,
+        add_avg_order_values.total_lifetime_value,
+        add_avg_order_values.avg_non_returned_order_value
 
-    from paid_orders
-
-    left join customers
-        on paid_orders.customer_id = customers.customer_id
+    from add_avg_order_values
 
 )
 
