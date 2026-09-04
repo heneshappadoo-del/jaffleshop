@@ -18,7 +18,7 @@ sources:
               period: hour
 
 models:
-  - name: stg_stripe__payments
+  - name: stg_stripe__payment
     description: Staged Stripe payment data.
 
     columns:
@@ -26,16 +26,13 @@ models:
         description: Primary key for payments.
 
       - name: order_id
-        description: Related order identifier.
+        description: Identifier of the related order.
 
-      - name: payment_method
-        description: Method used for the payment.
-
-      - name: status
-        description: Status of the payment.
-
-      - name: amount
-        description: Payment amount in dollars.
-
-      - name: created
+      - name: payment_created
         description: Timestamp when the payment was created.
+
+      - name: payment_status
+        description: Current status of the payment.
+
+      - name: payment_amount
+        description: Payment amount converted from cents and rounded to two decimal places.
